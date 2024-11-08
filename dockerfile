@@ -1,4 +1,4 @@
-# docker/dev.Dockerfile
+# Dockerfile
 FROM oven/bun:latest
 
 WORKDIR /app/next-app
