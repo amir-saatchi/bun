@@ -1,37 +1,41 @@
-# Use Bun base image
-FROM oven/bun:alpine AS build
+# Use the official Bun image as the base
+FROM oven/bun:1-slim AS base
+WORKDIR /usr/src/app
 
-# Set the working directory
-WORKDIR /app
+# Stage 1: Install dependencies for development and production
+FROM base AS install
+RUN mkdir -p /temp/dev
+COPY package.json bun.lockb /temp/dev/
+RUN cd /temp/dev && bun install --frozen-lockfile
 
-# Copy package files and install dependencies
-COPY package.json bun.lockb ./
-RUN bun install
+# Stage 2: Install only production dependencies
+FROM base AS prod-deps
+RUN mkdir -p /temp/prod
+COPY package.json bun.lockb /temp/prod/
+RUN cd /temp/prod && bun install --frozen-lockfile --production
 
-# Copy the rest of the app files
+# Stage 3: Prerelease - Copy dependencies and build the application
+FROM base AS prerelease
+COPY --from=install /temp/dev/node_modules node_modules
 COPY . .
 
-# Set environment variable for production mode
+# Build the Next.js app for production
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-# Build the Next.js app
 RUN bun run build
 
-# Use a new stage for the production runtime to keep the image small
-FROM oven/bun:alpine AS runner
+# Stage 4: Final release image
+FROM oven/bun:1-slim AS release
+WORKDIR /usr/src/app
 
-# Set the working directory
-WORKDIR /app
+# Copy production dependencies and only essential files
+COPY --from=prod-deps /temp/prod/node_modules ./node_modules
+COPY --from=prerelease /usr/src/app/.next ./.next
+COPY --from=prerelease /usr/src/app/public ./public
+COPY --from=prerelease /usr/src/app/package.json ./package.json
 
-# Copy only the built output and necessary files for running the server
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/package.json .
-COPY --from=build /app/node_modules ./node_modules
+# Use a non-root user for security
+USER bun
 
-# Expose port 3000 to the host
+# Expose port 3000 and run the application
 EXPOSE 3000
-
-# Start the Next.js app in production mode
 CMD ["bun", "run", "start"]
